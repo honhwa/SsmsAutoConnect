@@ -5,6 +5,7 @@ using System.Data;
 using System.Data.SqlClient;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using System.Windows.Forms;
 using Microsoft.SqlServer.Management.Smo.RegSvrEnum;
 using Microsoft.SqlServer.Management.UI.ConnectionDlg;
@@ -152,37 +153,107 @@ namespace SsmsAutoConnect
         }
 
         /// <summary>
-        /// Expands Databases under the server node and selects the database node. UI thread only.
-        /// Must be called right after <see cref="AttachToObjectExplorer"/> (which selects the new server root).
+        /// The server root node just added by <see cref="AttachToObjectExplorer"/> (AddHierarchy selects it).
+        /// UI thread only. Null if it can't be determined.
         /// </summary>
-        public bool SelectDatabaseNode(string serverName, string database)
+        public HierarchyTreeNode GetSelectedServerRoot()
         {
             ThreadHelper.ThrowIfNotOnUIThread();
+            return (GetTree() as TreeView)?.SelectedNode is HierarchyTreeNode root && root.Parent == null ? root : null;
+        }
 
-            // The server node's own URN uses the server's true name, which can differ from what was typed
-            // (e.g. "localhost" vs "MYPC\SQL2019"), so take it from the freshly-added, selected root node.
-            string serverUrn = null;
-            oe.GetSelectedNodes(out int count, out INodeInformation[] nodes);
-            if (count > 0 && nodes[0] != null && nodes[0].UrnPath == "Server")
-                serverUrn = nodes[0].Context;
-            if (string.IsNullOrEmpty(serverUrn))
-                serverUrn = $"Server[@Name='{EscapeUrn(serverName)}']";
+        /// <summary>
+        /// Expands Databases under <paramref name="root"/> and selects the database node, without blocking the UI:
+        /// it relies on OE's own asynchronous node expansion and yields between polls.
+        /// (The public FindNode/SynchronizeTree enumerate synchronously on the UI thread, ~15 s freeze on a remote server.)
+        /// </summary>
+        public async System.Threading.Tasks.Task<bool> SelectDatabaseNodeAsync(HierarchyTreeNode root, string database, CancellationToken ct)
+        {
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(ct);
+            IExplorerHierarchy hierarchy = root.Hierarchy;
 
-            string dbUrn = $"{serverUrn}/Database[@Name='{EscapeUrn(database)}']";
-            INodeInformation dbNode = oe.FindNode(dbUrn);
-            if (dbNode == null)
+            // 1. Server node finishes its async build (AddHierarchy already called Expand on it).
+            if (!root.IsExpanded)
+                root.Expand();
+            if (!await WaitUntilAsync(() => !hierarchy.IsBuilding && root.Nodes.Count > 0 && Info(root.Nodes[0]) != null, ct))
             {
-                Log.Error($"Database node not found in Object Explorer: {dbUrn}");
+                Log.Error($"Server node {root.Text} did not finish expanding");
+                return false;
+            }
+            TreeNode folder = FindChild(root, IsDatabasesFolder);
+#if DEBUG
+            Log.Info($"Children of {root.Text}: {DescribeChildren(root)}");
+#endif
+            if (folder == null)
+            {
+                Log.Error($"Databases folder not identified under {root.Text}; children: {DescribeChildren(root)}");
                 return false;
             }
 
-            // Expands the parents (Databases folder) and selects the node; it also expands the node itself.
-            oe.SynchronizeTree(dbNode);
+            // 2. Databases folder: expand (async build) and wait for the database node.
+            if (!folder.IsExpanded)
+                folder.Expand();
+            Func<TreeNode, bool> isTarget = n => IsDatabase(n, database);
+            if (!await WaitUntilAsync(() => !hierarchy.IsBuilding && FindChild(folder, isTarget) != null, ct))
+            {
+                Log.Error($"Database node '{database}' not found under {root.Text}/{folder.Text}");
+                return false;
+            }
 
-            if (GetTree() is TreeView treeView && treeView.SelectedNode != null && treeView.SelectedNode.IsExpanded)
-                treeView.SelectedNode.Collapse();
+            // 3. Select it.
+            TreeNode dbNode = FindChild(folder, isTarget);
+            dbNode.TreeView.SelectedNode = dbNode;
+            dbNode.EnsureVisible();
             return true;
         }
+
+        private static readonly TimeSpan NodeWaitLimit = TimeSpan.FromSeconds(120);
+
+        private static async System.Threading.Tasks.Task<bool> WaitUntilAsync(Func<bool> condition, CancellationToken ct)
+        {
+            DateTime deadline = DateTime.UtcNow + NodeWaitLimit;
+            while (true)
+            {
+                await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(ct);
+                if (condition())
+                    return true;
+                if (DateTime.UtcNow > deadline)
+                    return false;
+                await System.Threading.Tasks.Task.Delay(200, ct).ConfigureAwait(false);
+            }
+        }
+
+        private static TreeNode FindChild(TreeNode parent, Func<TreeNode, bool> predicate) =>
+            parent.Nodes.Cast<TreeNode>().FirstOrDefault(predicate);
+
+        private static INodeInformation Info(TreeNode node) =>
+            (node as IServiceProvider)?.GetService(typeof(INodeInformation)) as INodeInformation;
+
+        // The Databases folder is a static grouping node; its children are "Server/Database" nodes.
+        // Identify it by UrnPath, falling back to the (non-localized) InvariantName.
+        private static bool IsDatabasesFolder(TreeNode node)
+        {
+            INodeInformation info = Info(node);
+            if (info == null)
+                return false;
+            return string.Equals(info.InvariantName, "Databases", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(info.UrnPath, "Server/DatabasesFolder", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsDatabase(TreeNode node, string database)
+        {
+            INodeInformation info = Info(node);
+            return info != null
+                && info.UrnPath == "Server/Database"
+                && string.Equals(info.InvariantName ?? info.Name, database, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string DescribeChildren(TreeNode parent) =>
+            string.Join("; ", parent.Nodes.Cast<TreeNode>().Select(n =>
+            {
+                INodeInformation i = Info(n);
+                return i == null ? $"'{n.Text}' (no info)" : $"'{n.Text}' UrnPath={i.UrnPath} Invariant={i.InvariantName} Context={i.Context}";
+            }));
 
         private object GetTree()
         {
@@ -196,8 +267,6 @@ namespace SsmsAutoConnect
                 return null;
             }
         }
-
-        private static string EscapeUrn(string value) => value.Replace("'", "''");
 
         private static Type[] ParamTypes(MethodInfo m) => m.GetParameters().Select(p => p.ParameterType).ToArray();
     }

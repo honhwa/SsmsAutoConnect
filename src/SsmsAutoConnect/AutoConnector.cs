@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.SqlServer.Management.Smo.RegSvrEnum;
+using Microsoft.SqlServer.Management.UI.VSIntegration.ObjectExplorer;
 using Microsoft.VisualStudio.Shell;
 using Task = System.Threading.Tasks.Task;
 
@@ -43,13 +45,15 @@ namespace SsmsAutoConnect
                 Task = Task.Run(() => Prepare(bridge, e), ct),
             }).ToList();
 
-            // Attach on the UI thread in config order.
+            // Attach on the UI thread in config order; database-node selection then proceeds asynchronously.
+            var selections = new List<Task>();
             foreach (var p in pending)
             {
                 Prepared prepared;
                 try
                 {
                     prepared = await p.Task;
+                    Log.Info($"{p.Entry}: validated in {prepared.ValidateMs} ms (background)");
                 }
                 catch (Exception ex)
                 {
@@ -58,10 +62,13 @@ namespace SsmsAutoConnect
                 }
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(ct);
 
+                HierarchyTreeNode root;
+                var sw = Stopwatch.StartNew();
                 try
                 {
                     bridge.AttachToObjectExplorer(prepared.ConnectionInfo, prepared.LiveConnection);
-                    Log.Info($"{p.Entry}: connected in Object Explorer ({(bridge.UsesInternalConnect ? "internal" : "public")} route)");
+                    root = bridge.GetSelectedServerRoot();
+                    Log.Info($"{p.Entry}: connected in Object Explorer ({(bridge.UsesInternalConnect ? "internal" : "public")} route), UI thread {sw.ElapsedMilliseconds} ms");
                 }
                 catch (Exception ex)
                 {
@@ -71,15 +78,27 @@ namespace SsmsAutoConnect
 
                 if (string.IsNullOrEmpty(p.Entry.Database))
                     continue;
-                try
+                if (root == null)
                 {
-                    if (bridge.SelectDatabaseNode(p.Entry.Server.Trim(), p.Entry.Database))
-                        Log.Info($"{p.Entry}: database node selected");
+                    Log.Error($"{p.Entry}: server node not found after connecting; database not selected");
+                    continue;
                 }
-                catch (Exception ex)
-                {
-                    Log.Error($"{p.Entry}: selecting database node failed", ex);
-                }
+                selections.Add(SelectAsync(bridge, root, p.Entry, ct));
+            }
+            await Task.WhenAll(selections);
+        }
+
+        private static async Task SelectAsync(ObjectExplorerBridge bridge, HierarchyTreeNode root, ConnectionEntry entry, CancellationToken ct)
+        {
+            var sw = Stopwatch.StartNew();
+            try
+            {
+                if (await bridge.SelectDatabaseNodeAsync(root, entry.Database, ct))
+                    Log.Info($"{entry}: database node selected after {sw.ElapsedMilliseconds} ms");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"{entry}: selecting database node failed", ex);
             }
         }
 
@@ -87,12 +106,15 @@ namespace SsmsAutoConnect
         {
             public UIConnectionInfo ConnectionInfo;
             public IDbConnection LiveConnection;
+            public long ValidateMs;
         }
 
         private static Prepared Prepare(ObjectExplorerBridge bridge, ConnectionEntry e)
         {
             UIConnectionInfo ci = BuildConnectionInfo(e);
-            return new Prepared { ConnectionInfo = ci, LiveConnection = bridge.Validate(ci) };
+            var sw = Stopwatch.StartNew();
+            IDbConnection conn = bridge.Validate(ci);
+            return new Prepared { ConnectionInfo = ci, LiveConnection = conn, ValidateMs = sw.ElapsedMilliseconds };
         }
 
         private static UIConnectionInfo BuildConnectionInfo(ConnectionEntry e)
