@@ -63,3 +63,7 @@ For SQL logins written by hand, generate the `<Password>` value with the bundled
 - `%AppData%\SsmsAutoConnect\autoconnect.log` records each start: what was connected or skipped, timings, and errors.
 - Start SSMS with `Ssms.exe /log` to also write entries (source `SsmsAutoConnect`) to `%AppData%\Microsoft\AppEnv\15.0\ActivityLog.xml`.
 - SSMS freezes for several seconds per server while it builds the server node. That is SSMS's own work and happens just the same when you connect manually.
+
+## License
+
+[MIT](LICENSE)
