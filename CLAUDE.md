@@ -70,7 +70,18 @@ Implementation: `Microsoft.SqlServer.Management.SqlStudio.Explorer.ObjectExplore
 - If ValidateConnection/private ConnectToServer aren't found: validate with our own SqlConnection off-thread, then call
   public `ConnectToServer(ci)`.
 
-Node selection: `ObjectExplorerControl.AddHierarchy` selects and expands the new server root, so right after attaching,
-`GetSelectedNodes()[0].Context` is the server URN with the server's *true* name (e.g. `Server[@Name='PC\SQL2019']`).
-We append `/Database[@Name='db']` (quotes doubled), then `FindNode(urn)` (NotifyHandler.FindItem walks the navigable
-model, enumerating synchronously) and `SynchronizeTree(node)` (expands parents, selects, and expands the node; we collapse it).
+Node selection (v2, async). The first version used public `FindNode(urn)` + `SynchronizeTree`. Both enumerate
+synchronously on the UI thread, which took about 15 s on DEV with SSMS frozen, so they were dropped.
+Current approach: `ObjectExplorerControl.AddHierarchy` selects and expands the new server root (a public
+`HierarchyTreeNode`, whose `.Hierarchy.IsBuilding` is public). OE builds children asynchronously. We poll every 200 ms,
+yielding the UI thread: wait for the root to build, find the child with `INodeInformation.UrnPath == "Server/DatabasesFolder"`,
+`Expand()` it, wait for the child with `UrnPath == "Server/Database"` and `InvariantName == db`, then select it.
+`INodeInformation` comes from `((IServiceProvider)treeNode).GetService(typeof(INodeInformation))`.
+Observed on DEV: typed name `DEV`, true name in the URN `Server[@Name='SQLHOST01']`. That's why URNs aren't built from config.
+
+## Measured (2026-10-01, DEV, tools/probe-startup.ps1)
+- Validate (background): ~3.1 s. Not on the UI thread.
+- Private `ConnectToServer(ci, conn, false)` on the UI thread: **~9.8 s, UI frozen**. This is SSMS's own code
+  (GetHierarchy/BuildDataModel + AddHierarchy), the same path as connecting through the Connect dialog.
+- Async DB-node selection: ~15 s wall time; no unresponsive samples during it.
+- SSMS's own startup is unresponsive for ~10 s before our package even loads; that isn't us.

@@ -229,15 +229,15 @@ namespace SsmsAutoConnect
         private static INodeInformation Info(TreeNode node) =>
             (node as IServiceProvider)?.GetService(typeof(INodeInformation)) as INodeInformation;
 
-        // The Databases folder is a static grouping node; its children are "Server/Database" nodes.
-        // Identify it by UrnPath, falling back to the (non-localized) InvariantName.
+        // Verified on SSMS 18.10: the Databases folder has UrnPath "Server/DatabasesFolder", InvariantName "Databases"
+        // (both non-localized); its children are "Server/Database" nodes.
         private static bool IsDatabasesFolder(TreeNode node)
         {
             INodeInformation info = Info(node);
             if (info == null)
                 return false;
-            return string.Equals(info.InvariantName, "Databases", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(info.UrnPath, "Server/DatabasesFolder", StringComparison.OrdinalIgnoreCase);
+            return string.Equals(info.UrnPath, "Server/DatabasesFolder", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(info.InvariantName, "Databases", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool IsDatabase(TreeNode node, string database)
