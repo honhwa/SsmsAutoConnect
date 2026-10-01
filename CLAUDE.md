@@ -82,7 +82,7 @@ it's no longer building, then `Collapse()`.
 History: DB-node selection v1 used `FindNode(urn)` + `SynchronizeTree`. Those enumerate synchronously on the UI thread
 (~15 s freeze on DEV). v2 used async expansion (Databases folder = `INodeInformation.UrnPath == "Server/DatabasesFolder"`,
 DB = `UrnPath == "Server/Database"` + `InvariantName`; server URN uses the true name, e.g. typed `DEV` →
-`Server[@Name='SQLHOST01']`). Both were removed with the feature (git history: commits 6b2116a..214af70).
+`Server[@Name='SQLHOST01']`). Both were removed with the feature (see git history).
 
 ## Measured (2026-10-01, DEV, tools/probe-startup.ps1)
 - Validate (background): ~3.1 s. Not on the UI thread.
