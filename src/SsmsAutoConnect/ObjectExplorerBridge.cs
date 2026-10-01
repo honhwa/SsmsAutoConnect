@@ -163,109 +163,27 @@ namespace SsmsAutoConnect
         }
 
         /// <summary>
-        /// Expands Databases under <paramref name="root"/> and selects the database node, without blocking the UI:
-        /// it relies on OE's own asynchronous node expansion and yields between polls.
-        /// (The public FindNode/SynchronizeTree enumerate synchronously on the UI thread, ~15 s freeze on a remote server.)
+        /// Collapses the server node once SSMS has finished its own asynchronous build of it
+        /// (AddHierarchy expands every newly added server). Yields the UI thread while waiting.
         /// </summary>
-        public async System.Threading.Tasks.Task<bool> SelectDatabaseNodeAsync(HierarchyTreeNode root, string database, CollapseMode collapse, CancellationToken ct)
+        public async System.Threading.Tasks.Task<bool> CollapseWhenBuiltAsync(HierarchyTreeNode root, CancellationToken ct)
         {
-            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(ct);
-            IExplorerHierarchy hierarchy = root.Hierarchy;
-
-            // 1. Server node finishes its async build (AddHierarchy already called Expand on it).
-            if (!root.IsExpanded)
-                root.Expand();
-            if (!await WaitUntilAsync(() => !hierarchy.IsBuilding && root.Nodes.Count > 0 && Info(root.Nodes[0]) != null, ct))
-            {
-                Log.Error($"Server node {root.Text} did not finish expanding");
-                return false;
-            }
-            TreeNode folder = FindChild(root, IsDatabasesFolder);
-#if DEBUG
-            Log.Info($"Children of {root.Text}: {DescribeChildren(root)}");
-#endif
-            if (folder == null)
-            {
-                Log.Error($"Databases folder not identified under {root.Text}; children: {DescribeChildren(root)}");
-                return false;
-            }
-
-            // 2. Databases folder: expand (async build) and wait for the database node.
-            if (!folder.IsExpanded)
-                folder.Expand();
-            Func<TreeNode, bool> isTarget = n => IsDatabase(n, database);
-            if (!await WaitUntilAsync(() => !hierarchy.IsBuilding && FindChild(folder, isTarget) != null, ct))
-            {
-                Log.Error($"Database node '{database}' not found under {root.Text}/{folder.Text}");
-                return false;
-            }
-
-            // 3. Select it, then collapse as configured. Collapsing an ancestor of the selected node makes
-            //    WinForms move the selection to that ancestor.
-            TreeNode dbNode = FindChild(folder, isTarget);
-            dbNode.TreeView.SelectedNode = dbNode;
-            switch (collapse)
-            {
-                case CollapseMode.Server:
-                    root.Collapse(ignoreChildren: false);
-                    break;
-                case CollapseMode.Databases:
-                    folder.Collapse(ignoreChildren: false);
-                    break;
-                default:
-                    dbNode.EnsureVisible();
-                    break;
-            }
-            return true;
-        }
-
-        private static readonly TimeSpan NodeWaitLimit = TimeSpan.FromSeconds(120);
-
-        private static async System.Threading.Tasks.Task<bool> WaitUntilAsync(Func<bool> condition, CancellationToken ct)
-        {
-            DateTime deadline = DateTime.UtcNow + NodeWaitLimit;
+            DateTime deadline = DateTime.UtcNow + BuildWaitLimit;
             while (true)
             {
                 await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(ct);
-                if (condition())
+                if (!root.Hierarchy.IsBuilding)
+                {
+                    root.Collapse(ignoreChildren: false);
                     return true;
+                }
                 if (DateTime.UtcNow > deadline)
                     return false;
                 await System.Threading.Tasks.Task.Delay(200, ct).ConfigureAwait(false);
             }
         }
 
-        private static TreeNode FindChild(TreeNode parent, Func<TreeNode, bool> predicate) =>
-            parent.Nodes.Cast<TreeNode>().FirstOrDefault(predicate);
-
-        private static INodeInformation Info(TreeNode node) =>
-            (node as IServiceProvider)?.GetService(typeof(INodeInformation)) as INodeInformation;
-
-        // Verified on SSMS 18.10: the Databases folder has UrnPath "Server/DatabasesFolder", InvariantName "Databases"
-        // (both non-localized); its children are "Server/Database" nodes.
-        private static bool IsDatabasesFolder(TreeNode node)
-        {
-            INodeInformation info = Info(node);
-            if (info == null)
-                return false;
-            return string.Equals(info.UrnPath, "Server/DatabasesFolder", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(info.InvariantName, "Databases", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool IsDatabase(TreeNode node, string database)
-        {
-            INodeInformation info = Info(node);
-            return info != null
-                && info.UrnPath == "Server/Database"
-                && string.Equals(info.InvariantName ?? info.Name, database, StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static string DescribeChildren(TreeNode parent) =>
-            string.Join("; ", parent.Nodes.Cast<TreeNode>().Select(n =>
-            {
-                INodeInformation i = Info(n);
-                return i == null ? $"'{n.Text}' (no info)" : $"'{n.Text}' UrnPath={i.UrnPath} Invariant={i.InvariantName} Context={i.Context}";
-            }));
+        private static readonly TimeSpan BuildWaitLimit = TimeSpan.FromSeconds(120);
 
         private object GetTree()
         {

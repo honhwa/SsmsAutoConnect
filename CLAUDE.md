@@ -3,8 +3,10 @@
 ## Task
 On SSMS startup, connect every server listed in `%AppData%\SsmsAutoConnect\connections.xml`
 in **Object Explorer** (no query windows), using the configured database as the connection's
-initial database (Connect dialog → Options → "Connect to database"), then expand the
-Databases folder and select that database node. Skip servers already connected in OE.
+initial database (Connect dialog → Options → "Connect to database"). Skip servers already connected in OE.
+The server node is collapsed once SSMS finishes building it. The original spec also asked to expand Databases and select the DB
+node; that was built, then **removed at the user's request (2026-10-01)**: "New Query" on the server node already
+opens in the configured database, which is all the user needs (they confirmed it in SSMS).
 Passwords are stored DPAPI-encrypted (CurrentUser). Failures go to the ActivityLog
 (`ActivityLog.LogError("SsmsAutoConnect", ...)`), and one bad entry never blocks the others.
 
@@ -28,7 +30,7 @@ Phase 2 (only after the user confirms Phase 1): an OE context-menu command on da
 - `src/SsmsAutoConnect/`: the VSIX package (classic csproj, net472, AnyCPU)
   - `SsmsAutoConnectPackage.cs`: AsyncPackage, background auto-load on NoSolution; polls (500 ms, max 60 s) for
     shell-not-zombie + `IObjectExplorerService`, then runs AutoConnector
-  - `AutoConnector.cs`: dedupe, parallel off-UI-thread validation, attach + select in config order on the UI thread
+  - `AutoConnector.cs`: dedupe, parallel off-UI-thread validation, attach in config order on the UI thread, then collapse each server node
   - `ObjectExplorerBridge.cs`: **all reflection into SSMS internals lives here**
   - `ConnectionConfig.cs`: XML config (XDocument, no XmlSerializer), `PasswordProtector.cs` DPAPI, `Log.cs`
 - `src/SsmsAutoConnect.Protect/`: console tool that prints the DPAPI blob for `<Password>` (links PasswordProtector.cs)
@@ -65,30 +67,23 @@ Implementation: `Microsoft.SqlServer.Management.SqlStudio.Explorer.ObjectExplore
   `DatabaseName` from `ci.AdvancedOptions["DATABASE"]`. That is how the initial database takes effect.
 - **internal property `Tree`** (ObjectExplorerControl, a TreeView) → **internal `Hierarchies`**
   (`OEHierarchies : Dictionary<string, IExplorerHierarchy>`). Keys = `SharedConnectionUtil.GetConnectionKeyName`:
-  `"<ServerName as typed> (SQLServer, trusted)"` or `"... (SQLServer, user = X)"`. Used for dedupe, and to collapse the
-  selected DB node after SynchronizeTree.
+  `"<ServerName as typed> (SQLServer, trusted)"` or `"... (SQLServer, user = X)"`. Used for dedupe.
 - If ValidateConnection/private ConnectToServer aren't found: validate with our own SqlConnection off-thread, then call
   public `ConnectToServer(ci)`.
 
-Node selection (v2, async). The first version used public `FindNode(urn)` + `SynchronizeTree`. Both enumerate
-synchronously on the UI thread, which took about 15 s on DEV with SSMS frozen, so they were dropped.
-Current approach: `ObjectExplorerControl.AddHierarchy` selects and expands the new server root (a public
-`HierarchyTreeNode`, whose `.Hierarchy.IsBuilding` is public). OE builds children asynchronously. We poll every 200 ms,
-yielding the UI thread: wait for the root to build, find the child with `INodeInformation.UrnPath == "Server/DatabasesFolder"`,
-`Expand()` it, wait for the child with `UrnPath == "Server/Database"` and `InvariantName == db`, then select it.
-`INodeInformation` comes from `((IServiceProvider)treeNode).GetService(typeof(INodeInformation))`.
-Observed on DEV: typed name `DEV`, true name in the URN `Server[@Name='SQLHOST01']`. That's why URNs aren't built from config.
+After attaching: `ObjectExplorerControl.AddHierarchy` selects and expands the new server root. Tree.SelectedNode is a
+public `HierarchyTreeNode` whose `.Hierarchy.IsBuilding` is public. We poll every 200 ms (yielding the UI thread) until
+it's no longer building, then `Collapse()`.
+
+History: DB-node selection v1 used `FindNode(urn)` + `SynchronizeTree`. Those enumerate synchronously on the UI thread
+(~15 s freeze on DEV). v2 used async expansion (Databases folder = `INodeInformation.UrnPath == "Server/DatabasesFolder"`,
+DB = `UrnPath == "Server/Database"` + `InvariantName`; server URN uses the true name, e.g. typed `DEV` →
+`Server[@Name='SQLHOST01']`). Both were removed with the feature (git history: commits 6b2116a..214af70).
 
 ## Measured (2026-10-01, DEV, tools/probe-startup.ps1)
 - Validate (background): ~3.1 s. Not on the UI thread.
 - Private `ConnectToServer(ci, conn, false)` on the UI thread: **~9.8 s, UI frozen**. This is SSMS's own code
   (GetHierarchy/BuildDataModel + AddHierarchy), the same path as connecting through the Connect dialog.
-- Async DB-node selection: ~15 s wall time; no unresponsive samples during it.
 - SSMS's own startup is unresponsive for ~10 s before our package even loads; that isn't us.
 - With a second server (QA), the warm second attach still took 9.6 s, so it's per-connection SSMS work, not
   first-connection cost. Preloading won't help, so we accept it (same as a manual connect).
-
-## Collapse setting
-`<Connections Collapse="Server|Databases|None">`, default `Server` (the user's preference). It applies after the DB node is
-selected. Collapsing an ancestor moves the WinForms selection to that ancestor, so with Server/Databases the DB node
-ends up not selected; only `None` leaves it selected.

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
@@ -17,13 +17,13 @@ namespace SsmsAutoConnect
         private static readonly Guid DatabaseEngineServerType = new Guid("8c91a03d-f9b4-46c0-a305-b5dcc79ff907");
 
         /// <summary>Called on the UI thread with Object Explorer available.</summary>
-        public static async Task RunAsync(ObjectExplorerBridge bridge, ConnectionSettings settings, CancellationToken ct)
+        public static async Task RunAsync(ObjectExplorerBridge bridge, IReadOnlyList<ConnectionEntry> entries, CancellationToken ct)
         {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(ct);
 
             HashSet<string> connected = bridge.GetConnectedServerNames() ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var toConnect = new List<ConnectionEntry>();
-            foreach (ConnectionEntry e in settings.Entries)
+            foreach (ConnectionEntry e in entries)
             {
                 if (string.IsNullOrWhiteSpace(e.Server))
                 {
@@ -45,8 +45,8 @@ namespace SsmsAutoConnect
                 Task = Task.Run(() => Prepare(bridge, e), ct),
             }).ToList();
 
-            // Attach on the UI thread in config order; database-node selection then proceeds asynchronously.
-            var selections = new List<Task>();
+            // Attach on the UI thread in config order; collapsing then waits asynchronously for SSMS's node build.
+            var collapses = new List<Task>();
             foreach (var p in pending)
             {
                 Prepared prepared;
@@ -76,29 +76,24 @@ namespace SsmsAutoConnect
                     continue;
                 }
 
-                if (string.IsNullOrEmpty(p.Entry.Database))
-                    continue;
                 if (root == null)
-                {
-                    Log.Error($"{p.Entry}: server node not found after connecting; database not selected");
-                    continue;
-                }
-                selections.Add(SelectAsync(bridge, root, p.Entry, settings.Collapse, ct));
+                    Log.Error($"{p.Entry}: server node not found after connecting; left expanded");
+                else
+                    collapses.Add(CollapseAsync(bridge, root, p.Entry, ct));
             }
-            await Task.WhenAll(selections);
+            await Task.WhenAll(collapses);
         }
 
-        private static async Task SelectAsync(ObjectExplorerBridge bridge, HierarchyTreeNode root, ConnectionEntry entry, CollapseMode collapse, CancellationToken ct)
+        private static async Task CollapseAsync(ObjectExplorerBridge bridge, HierarchyTreeNode root, ConnectionEntry entry, CancellationToken ct)
         {
-            var sw = Stopwatch.StartNew();
             try
             {
-                if (await bridge.SelectDatabaseNodeAsync(root, entry.Database, collapse, ct))
-                    Log.Info($"{entry}: database node selected after {sw.ElapsedMilliseconds} ms (collapse: {collapse})");
+                if (!await bridge.CollapseWhenBuiltAsync(root, ct))
+                    Log.Error($"{entry}: server node still building after timeout; left expanded");
             }
             catch (Exception ex)
             {
-                Log.Error($"{entry}: selecting database node failed", ex);
+                Log.Error($"{entry}: collapsing server node failed", ex);
             }
         }
 
