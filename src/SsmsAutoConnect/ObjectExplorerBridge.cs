@@ -125,10 +125,10 @@ namespace SsmsAutoConnect
         }
 
         /// <summary>
-        /// Server names currently connected in Object Explorer (as typed when connecting).
+        /// Connections currently in Object Explorer, as <see cref="ConnectionEntry.MakeKey"/> keys (server as typed + login).
         /// Returns null if the internal tree isn't accessible. UI thread only.
         /// </summary>
-        public HashSet<string> GetConnectedServerNames()
+        public HashSet<string> GetConnectedKeys()
         {
             ThreadHelper.ThrowIfNotOnUIThread();
             object tree = GetTree();
@@ -139,17 +139,38 @@ namespace SsmsAutoConnect
             if (!(hierarchiesProperty?.GetValue(tree) is IDictionary hierarchies))
                 return null;
 
-            // Keys come from SharedConnectionUtil.GetConnectionKeyName: "<ServerName> (SQLServer, trusted)".
-            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (object key in hierarchies.Keys)
             {
-                string s = key as string;
-                if (string.IsNullOrEmpty(s))
-                    continue;
-                int paren = s.IndexOf(" (", StringComparison.Ordinal);
-                names.Add(paren > 0 ? s.Substring(0, paren) : s);
+                if (key is string s && ParseHierarchyKey(s) is string k)
+                    keys.Add(k);
             }
-            return names;
+            return keys;
+        }
+
+        /// <summary>
+        /// Hierarchy keys come from SharedConnectionUtil.GetConnectionKeyName:
+        ///   "DEV (SQLServer, trusted)"            → Windows auth
+        ///   "DEV (SQLServer, user = ro_user)"     → SQL login (Azure adds ", &lt;db&gt;" / ", tenant = ...")
+        /// Non-SQL Server connections (OLAP, SSIS, ...) return null.
+        /// </summary>
+        internal static string ParseHierarchyKey(string key)
+        {
+            int paren = key.IndexOf(" (", StringComparison.Ordinal);
+            if (paren <= 0 || !key.EndsWith(")", StringComparison.Ordinal))
+                return null;
+            string server = key.Substring(0, paren);
+            string rest = key.Substring(paren + 2, key.Length - paren - 3);   // "SQLServer, trusted"
+            if (!rest.StartsWith("SQLServer", StringComparison.Ordinal))
+                return null;
+
+            const string userPrefix = ", user = ";
+            int u = rest.IndexOf(userPrefix, StringComparison.Ordinal);
+            if (u < 0)
+                return ConnectionEntry.MakeKey(server, null);
+            string login = rest.Substring(u + userPrefix.Length);
+            int comma = login.IndexOf(", ", StringComparison.Ordinal);
+            return ConnectionEntry.MakeKey(server, comma >= 0 ? login.Substring(0, comma) : login);
         }
 
         /// <summary>

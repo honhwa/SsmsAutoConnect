@@ -44,7 +44,10 @@ Phase 2 (only after the user confirms Phase 1): an OE context-menu command on da
   Microsoft.SqlServer.RegSvrEnum, Microsoft.SqlServer.ConnectionInfo. No reference to ObjectExplorer.dll or
   SqlStudio.Explorer.dll; those are reached only via reflection.
 - Deploy by copying manifest + dll + pkgdef into `IDE\Extensions\SsmsAutoConnect\`, then `Ssms.exe /setup`.
-- Dedupe is by server name (case-insensitive, as typed) against the OE hierarchy keys, regardless of login.
+- **Connection identity = server (as typed) + login** (Windows auth counts as one login), case-insensitive; see
+  `ConnectionEntry.Key`/`MakeKey`. The user wants several logins per server (e.g. RO user + admin). Startup dedupe compares
+  this key with the OE hierarchy keys (`ObjectExplorerBridge.ParseHierarchyKey`); the same key twice in the config gets
+  logged and the duplicate skipped. SSMS itself keys OE connections by server + login, so two logins to one server is native.
 - Diagnostics: ActivityLog (only with `Ssms.exe /log`, at `%AppData%\Microsoft\AppEnv\15.0\ActivityLog.xml`) plus
   `%AppData%\SsmsAutoConnect\autoconnect.log` (always written, reset on each SSMS start).
 - Passwords: DPAPI CurrentUser with entropy "SsmsAutoConnect.v1", base64 in `<Password>`.
@@ -67,7 +70,8 @@ Implementation: `Microsoft.SqlServer.Management.SqlStudio.Explorer.ObjectExplore
   `DatabaseName` from `ci.AdvancedOptions["DATABASE"]`. That is how the initial database takes effect.
 - **internal property `Tree`** (ObjectExplorerControl, a TreeView) → **internal `Hierarchies`**
   (`OEHierarchies : Dictionary<string, IExplorerHierarchy>`). Keys = `SharedConnectionUtil.GetConnectionKeyName`:
-  `"<ServerName as typed> (SQLServer, trusted)"` or `"... (SQLServer, user = X)"`. Used for dedupe.
+  `"<ServerName as typed> (SQLServer, trusted)"` or `"... (SQLServer, user = X)"` (Azure appends `, <db>`/`, tenant = ...`).
+  Parsed to server + login for dedupe.
 - If ValidateConnection/private ConnectToServer aren't found: validate with our own SqlConnection off-thread, then call
   public `ConnectToServer(ci)`.
 
@@ -99,6 +103,6 @@ DB = `UrnPath == "Server/Database"` + `InvariantName`; server URN uses the true 
   into VS MenuCommand plumbing that needs CommandGuid/ItemId).
 - Click: re-reads the selected node; server = `node.Connection.ServerName` (as typed), database = `node.Name`;
   SQL login → `SqlConnectionInfo.UserName/Password`, password DPAPI-protected.
-- `ConnectionConfig.AddOrUpdate`: in-place XML edit, preserving whitespace, comments and the absent XML declaration. If the server
-  is already listed (case-insensitive), its database/auth are **replaced** (one connection per server); otherwise it's appended.
+- `ConnectionConfig.AddOrUpdate`: in-place XML edit, preserving whitespace, comments and the absent XML declaration. If the same
+  server + login is already listed, its database (and password, for SQL logins) is **replaced**; otherwise it's appended.
 - Menu registration happens even when the config has no entries, and its failure never blocks auto-connect.

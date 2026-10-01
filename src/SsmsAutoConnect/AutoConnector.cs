@@ -21,7 +21,8 @@ namespace SsmsAutoConnect
         {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(ct);
 
-            HashSet<string> connected = bridge.GetConnectedServerNames() ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            // A connection is server + login: the same server may be listed once per login (e.g. a read-only user and an admin).
+            HashSet<string> connected = bridge.GetConnectedKeys() ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var toConnect = new List<ConnectionEntry>();
             foreach (ConnectionEntry e in entries)
             {
@@ -30,9 +31,14 @@ namespace SsmsAutoConnect
                     Log.Error("Config entry without <Server> skipped");
                     continue;
                 }
-                if (connected.Contains(e.Server.Trim()) || toConnect.Any(x => string.Equals(x.Server.Trim(), e.Server.Trim(), StringComparison.OrdinalIgnoreCase)))
+                if (connected.Contains(e.Key))
                 {
-                    Log.Info($"{e}: server already connected in Object Explorer (or listed twice), skipped");
+                    Log.Info($"{e}: already connected in Object Explorer with this login, skipped");
+                    continue;
+                }
+                if (toConnect.Any(x => string.Equals(x.Key, e.Key, StringComparison.OrdinalIgnoreCase)))
+                {
+                    Log.Error($"{e}: same server and login listed more than once in config; only the first is used");
                     continue;
                 }
                 toConnect.Add(e);

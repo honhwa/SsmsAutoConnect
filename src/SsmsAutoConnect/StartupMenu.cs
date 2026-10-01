@@ -85,8 +85,8 @@ namespace SsmsAutoConnect
                 Log.Info($"{entry}: {(updated ? "updated in" : "added to")} startup connections (node {node.Context})");
 
                 string message = updated
-                    ? $"Updated {entry.Server} in startup connections: database is now {entry.Database}."
-                    : $"Added {entry.Server} / {entry.Database} to startup connections.";
+                    ? $"Updated startup connection {entry.Server} ({Login(entry)}): database is now {entry.Database}."
+                    : $"Added startup connection {entry.Server} ({Login(entry)}) / {entry.Database}.";
                 if (warning != null)
                     message += Environment.NewLine + Environment.NewLine + warning;
                 Show(title, message + Environment.NewLine + Environment.NewLine + ConnectionConfig.ConfigPath,
@@ -122,6 +122,8 @@ namespace SsmsAutoConnect
             }
             return entry;
         }
+
+        private static string Login(ConnectionEntry entry) => entry.UseWindowsAuth ? "Windows authentication" : "login " + entry.UserName;
 
         private void Show(string title, string message, OLEMSGICON icon) =>
             VsShellUtilities.ShowMessageBox(package, message, title, icon, OLEMSGBUTTON.OLEMSGBUTTON_OK, OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);

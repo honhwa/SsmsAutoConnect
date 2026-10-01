@@ -16,7 +16,15 @@ namespace SsmsAutoConnect
         /// <summary>DPAPI-protected, base64 (see PasswordProtector). Never plain text.</summary>
         public string Password { get; set; }
 
-        public override string ToString() => $"{Server}/{(string.IsNullOrEmpty(Database) ? "<default db>" : Database)}";
+        /// <summary>Server + login: entries with the same key are the same connection.</summary>
+        public string Key => MakeKey(Server, UseWindowsAuth ? null : UserName);
+
+        /// <summary>Identity of a connection: server + login (null/empty login = Windows auth). Compare case-insensitively.</summary>
+        public static string MakeKey(string server, string sqlLogin) =>
+            $"{server?.Trim()}|{(string.IsNullOrEmpty(sqlLogin) ? "<windows>" : sqlLogin.Trim())}";
+
+        public override string ToString() =>
+            $"{Server}/{(string.IsNullOrEmpty(Database) ? "<default db>" : Database)} ({(UseWindowsAuth ? "Windows" : UserName)})";
     }
 
     /// <summary>
@@ -56,17 +64,17 @@ namespace SsmsAutoConnect
         public static IReadOnlyList<ConnectionEntry> Load()
         {
             XDocument doc = XDocument.Load(ConfigPath);
-            return doc.Root.Elements("Connection")
-                .Select(e => new ConnectionEntry
-                {
-                    Server = Text(e, "Server"),
-                    Database = Text(e, "Database"),
-                    UseWindowsAuth = !bool.TryParse(Text(e, "UseWindowsAuth"), out bool b) || b,
-                    UserName = Text(e, "UserName"),
-                    Password = Text(e, "Password"),
-                })
-                .ToList();
+            return doc.Root.Elements("Connection").Select(Parse).ToList();
         }
+
+        private static ConnectionEntry Parse(XElement e) => new ConnectionEntry
+        {
+            Server = Text(e, "Server"),
+            Database = Text(e, "Database"),
+            UseWindowsAuth = !bool.TryParse(Text(e, "UseWindowsAuth"), out bool b) || b,
+            UserName = Text(e, "UserName"),
+            Password = Text(e, "Password"),
+        };
 
         public static void Save(IEnumerable<ConnectionEntry> entries)
         {
@@ -84,8 +92,9 @@ namespace SsmsAutoConnect
         }
 
         /// <summary>
-        /// Adds <paramref name="entry"/>, or, if its server is already listed, updates that entry (database and auth).
-        /// Edits the XML in place so other entries, comments and formatting are kept. Returns true if it updated an entry.
+        /// Adds <paramref name="entry"/>, or, if the same server + login is already listed, updates that entry's database
+        /// (and password). Edits the XML in place so other entries, comments and formatting are kept.
+        /// Returns true if it updated an entry.
         /// </summary>
         public static bool AddOrUpdate(ConnectionEntry entry)
         {
@@ -94,14 +103,13 @@ namespace SsmsAutoConnect
 
             XDocument doc = XDocument.Load(ConfigPath, LoadOptions.PreserveWhitespace);
             XElement existing = doc.Root.Elements("Connection").FirstOrDefault(e =>
-                string.Equals(Text(e, "Server"), entry.Server, StringComparison.OrdinalIgnoreCase));
+                string.Equals(Parse(e).Key, entry.Key, StringComparison.OrdinalIgnoreCase));
 
             if (existing != null)
             {
                 SetChild(existing, "Database", entry.Database);
-                SetChild(existing, "UseWindowsAuth", entry.UseWindowsAuth ? "true" : "false");
-                SetChild(existing, "UserName", entry.UserName);
-                SetChild(existing, "Password", entry.Password);
+                if (!entry.UseWindowsAuth && !string.IsNullOrEmpty(entry.Password))
+                    SetChild(existing, "Password", entry.Password);
             }
             else
             {
