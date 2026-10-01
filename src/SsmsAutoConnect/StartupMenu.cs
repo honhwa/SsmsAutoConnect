@@ -81,6 +81,21 @@ namespace SsmsAutoConnect
                 }
 
                 ConnectionEntry entry = BuildEntry(node, out string warning);
+
+                ConnectionEntry existing = ConnectionConfig.Find(entry);
+                if (existing != null)
+                {
+                    string question =
+                        $"Startup connection {existing.Server} ({Login(existing)}) already exists " +
+                        $"with database {existing.Database ?? "<default>"}." + Environment.NewLine + Environment.NewLine +
+                        $"Replace it with database {entry.Database}?";
+                    if (Ask(title, question) != DialogResult.Yes)
+                    {
+                        Log.Info($"{entry}: already in startup connections; user kept the existing entry");
+                        return;
+                    }
+                }
+
                 bool updated = ConnectionConfig.AddOrUpdate(entry);
                 Log.Info($"{entry}: {(updated ? "updated in" : "added to")} startup connections (node {node.Context})");
 
@@ -124,6 +139,10 @@ namespace SsmsAutoConnect
         }
 
         private static string Login(ConnectionEntry entry) => entry.UseWindowsAuth ? "Windows authentication" : "login " + entry.UserName;
+
+        private DialogResult Ask(string title, string message) =>
+            (DialogResult)VsShellUtilities.ShowMessageBox(package, message, title, OLEMSGICON.OLEMSGICON_QUERY,
+                OLEMSGBUTTON.OLEMSGBUTTON_YESNO, OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_SECOND);
 
         private void Show(string title, string message, OLEMSGICON icon) =>
             VsShellUtilities.ShowMessageBox(package, message, title, icon, OLEMSGBUTTON.OLEMSGBUTTON_OK, OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);

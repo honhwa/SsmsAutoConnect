@@ -106,3 +106,6 @@ DB = `UrnPath == "Server/Database"` + `InvariantName`; server URN uses the true 
 - `ConnectionConfig.AddOrUpdate`: in-place XML edit, preserving whitespace, comments and the absent XML declaration. If the same
   server + login is already listed, its database (and password, for SQL logins) is **replaced**; otherwise it's appended.
 - Menu registration happens even when the config has no entries, and its failure never blocks auto-connect.
+- If the server + login already exists, the command asks (Yes/No, default No) before replacing; No leaves the config untouched.
+- SSMS's startup Connect dialog: we don't suppress it in code. The user is pointed at Tools > Options > Environment > Startup >
+  "Open empty environment" (our connect code shows the Object Explorer window itself).

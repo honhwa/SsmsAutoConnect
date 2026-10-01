@@ -91,6 +91,14 @@ namespace SsmsAutoConnect
             doc.Save(ConfigPath);
         }
 
+        /// <summary>The configured entry with the same server + login as <paramref name="entry"/>, or null.</summary>
+        public static ConnectionEntry Find(ConnectionEntry entry)
+        {
+            if (!File.Exists(ConfigPath))
+                return null;
+            return Load().FirstOrDefault(e => string.Equals(e.Key, entry.Key, StringComparison.OrdinalIgnoreCase));
+        }
+
         /// <summary>
         /// Adds <paramref name="entry"/>, or, if the same server + login is already listed, updates that entry's database
         /// (and password). Edits the XML in place so other entries, comments and formatting are kept.
