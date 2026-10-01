@@ -47,6 +47,7 @@
     <Compile Include="ObjectExplorerBridge.cs" />
     <Compile Include="PasswordProtector.cs" />
     <Compile Include="Log.cs" />
+    <Compile Include="StartupMenu.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="source.extension.vsixmanifest">
@@ -57,6 +58,7 @@
     <Reference Include="System" />
     <Reference Include="System.Data" />
     <Reference Include="System.Design" />
+    <Reference Include="System.Drawing" />
     <Reference Include="System.Security" />
     <Reference Include="System.Windows.Forms" />
     <Reference Include="System.Xml" />
@@ -76,6 +78,10 @@
     </Reference>
     <Reference Include="Microsoft.SqlServer.RegSvrEnum">
       <HintPath>$(SsmsIdeDir)\Microsoft.SqlServer.RegSvrEnum.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="Microsoft.SqlServer.Management.Sdk.SqlStudio">
+      <HintPath>$(SsmsIdeDir)\Microsoft.SqlServer.Management.Sdk.SqlStudio.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="Microsoft.SqlServer.ConnectionInfo">

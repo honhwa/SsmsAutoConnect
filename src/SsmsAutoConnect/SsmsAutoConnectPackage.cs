@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
+using Microsoft.SqlServer.Management;
 using Microsoft.SqlServer.Management.UI.VSIntegration;
 using Microsoft.SqlServer.Management.UI.VSIntegration.ObjectExplorer;
 using Microsoft.VisualStudio.Shell;
@@ -37,8 +38,6 @@ namespace SsmsAutoConnect
                 IReadOnlyList<ConnectionEntry> entries = await Task.Run(() => ConnectionConfig.LoadOrCreateSample(), ct);
                 int count = entries.Count;
                 Log.Info($"Loaded {count} entr{(count == 1 ? "y" : "ies")} from {ConnectionConfig.ConfigPath}");
-                if (count == 0)
-                    return;
 
                 IObjectExplorerService oe = await WaitForObjectExplorerAsync(ct);
                 if (oe == null)
@@ -46,6 +45,11 @@ namespace SsmsAutoConnect
                     Log.Error($"Object Explorer service not available after {ObjectExplorerWaitLimit.TotalSeconds:0}s; giving up");
                     return;
                 }
+
+                await JoinableTaskFactory.SwitchToMainThreadAsync(ct);
+                await RegisterMenuAsync(oe);
+                if (count == 0)
+                    return;
 
                 await JoinableTaskFactory.SwitchToMainThreadAsync(ct);
                 var bridge = new ObjectExplorerBridge(oe);
@@ -58,6 +62,27 @@ namespace SsmsAutoConnect
             catch (Exception ex)
             {
                 Log.Error("Auto-connect failed", ex);
+            }
+        }
+
+        private async Task RegisterMenuAsync(IObjectExplorerService oe)
+        {
+            // A failure here must not stop the auto-connect.
+            try
+            {
+                if (await GetServiceAsync(typeof(IContextService)) is IContextService contextService)
+                {
+                    await JoinableTaskFactory.SwitchToMainThreadAsync();
+                    StartupMenu.Register(this, oe, contextService);
+                }
+                else
+                {
+                    Log.Error("IContextService not available; 'Add to startup connections' menu not registered");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Registering Object Explorer menu failed", ex);
             }
         }
 

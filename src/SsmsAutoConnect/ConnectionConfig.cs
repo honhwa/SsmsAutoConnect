@@ -83,6 +83,52 @@ namespace SsmsAutoConnect
             doc.Save(ConfigPath);
         }
 
+        /// <summary>
+        /// Adds <paramref name="entry"/>, or, if its server is already listed, updates that entry (database and auth).
+        /// Edits the XML in place so other entries, comments and formatting are kept. Returns true if it updated an entry.
+        /// </summary>
+        public static bool AddOrUpdate(ConnectionEntry entry)
+        {
+            if (!File.Exists(ConfigPath))
+                Save(new ConnectionEntry[0]);
+
+            XDocument doc = XDocument.Load(ConfigPath, LoadOptions.PreserveWhitespace);
+            XElement existing = doc.Root.Elements("Connection").FirstOrDefault(e =>
+                string.Equals(Text(e, "Server"), entry.Server, StringComparison.OrdinalIgnoreCase));
+
+            if (existing != null)
+            {
+                SetChild(existing, "Database", entry.Database);
+                SetChild(existing, "UseWindowsAuth", entry.UseWindowsAuth ? "true" : "false");
+                SetChild(existing, "UserName", entry.UserName);
+                SetChild(existing, "Password", entry.Password);
+            }
+            else
+            {
+                doc.Root.Add(
+                    new XText("  "),
+                    new XElement("Connection",
+                        new XElement("Server", entry.Server),
+                        new XElement("Database", entry.Database ?? string.Empty),
+                        new XElement("UseWindowsAuth", entry.UseWindowsAuth ? "true" : "false"),
+                        new XElement("UserName", entry.UserName ?? string.Empty),
+                        new XElement("Password", entry.Password ?? string.Empty)),
+                    new XText(Environment.NewLine));
+            }
+            var settings = new System.Xml.XmlWriterSettings { OmitXmlDeclaration = doc.Declaration == null };
+            using (var writer = System.Xml.XmlWriter.Create(ConfigPath, settings))
+                doc.Save(writer);
+            return existing != null;
+        }
+
+        private static void SetChild(XElement parent, string name, string value)
+        {
+            XElement child = parent.Element(name);
+            if (child == null)
+                parent.Add(child = new XElement(name));
+            child.Value = value ?? string.Empty;
+        }
+
         private static string Text(XElement parent, string name)
         {
             string value = parent.Element(name)?.Value?.Trim();

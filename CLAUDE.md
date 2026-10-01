@@ -87,3 +87,18 @@ DB = `UrnPath == "Server/Database"` + `InvariantName`; server URN uses the true 
 - SSMS's own startup is unresponsive for ~10 s before our package even loads; that isn't us.
 - With a second server (QA), the warm second attach still took 9.6 s, so it's per-connection SSMS work, not
   first-connection cost. Preloading won't help, so we accept it (same as a manual connect).
+
+## Phase 2: "Add to startup connections" (StartupMenu.cs, public APIs only)
+- `IContextService` (Microsoft.SqlServer.Management.Sdk.SqlStudio.dll, proffered by SqlStudioExplorer) via
+  `GetServiceAsync`; subscribe to `ActionContext.CurrentContextChanged`.
+- On change: `IObjectExplorerService.GetSelectedNodes`; if exactly one node with `UrnPath == "Server/Database"`, take
+  `node.GetService(typeof(IMenuHandler))`. In 18.10 this is `ObjectExplorer.DefaultMenuHandler : HierarchyObject`.
+  Call `AddChild("", new MenuItem())` once per handler instance (ConditionalWeakTable). Handlers are cloned per node.
+- `DefaultMenuHandler.GetMenuItems` calls children that are `IWinformsMenuHandler`. Our item is
+  `HierarchyObject + IWinformsMenuHandler` and deliberately NOT `IMenuItem`/`ToolsMenuItemBase` (AddChild routes IMenuItem
+  into VS MenuCommand plumbing that needs CommandGuid/ItemId).
+- Click: re-reads the selected node; server = `node.Connection.ServerName` (as typed), database = `node.Name`;
+  SQL login → `SqlConnectionInfo.UserName/Password`, password DPAPI-protected.
+- `ConnectionConfig.AddOrUpdate`: in-place XML edit, preserving whitespace, comments and the absent XML declaration. If the server
+  is already listed (case-insensitive), its database/auth are **replaced** (one connection per server); otherwise it's appended.
+- Menu registration happens even when the config has no entries, and its failure never blocks auto-connect.
