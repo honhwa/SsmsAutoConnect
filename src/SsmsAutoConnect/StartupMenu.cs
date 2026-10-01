@@ -88,7 +88,7 @@ namespace SsmsAutoConnect
                     string question =
                         $"Startup connection {existing.Server} ({Login(existing)}) already exists " +
                         $"with database {existing.Database ?? "<default>"}." + Environment.NewLine + Environment.NewLine +
-                        $"Replace it with database {entry.Database}?";
+                        $"Replace it with database {entry.Database}{ColorText(entry)}?";
                     if (Ask(title, question) != DialogResult.Yes)
                     {
                         Log.Info($"{entry}: already in startup connections; user kept the existing entry");
@@ -100,8 +100,8 @@ namespace SsmsAutoConnect
                 Log.Info($"{entry}: {(updated ? "updated in" : "added to")} startup connections (node {node.Context})");
 
                 string message = updated
-                    ? $"Updated startup connection {entry.Server} ({Login(entry)}): database is now {entry.Database}."
-                    : $"Added startup connection {entry.Server} ({Login(entry)}) / {entry.Database}.";
+                    ? $"Updated startup connection {entry.Server} ({Login(entry)}): database is now {entry.Database}{ColorText(entry)}."
+                    : $"Added startup connection {entry.Server} ({Login(entry)}) / {entry.Database}{ColorText(entry)}.";
                 if (warning != null)
                     message += Environment.NewLine + Environment.NewLine + warning;
                 Show(title, message + Environment.NewLine + Environment.NewLine + ConnectionConfig.ConfigPath,
@@ -123,6 +123,7 @@ namespace SsmsAutoConnect
                 Server = connection.ServerName,   // as typed when connecting, e.g. "DEV"
                 Database = node.Name,
                 UseWindowsAuth = true,
+                Color = ObjectExplorerBridge.TryGetCustomColor(connection),
             };
 
             if (connection is SqlConnectionInfo sql && !sql.UseIntegratedSecurity)
@@ -137,6 +138,9 @@ namespace SsmsAutoConnect
             }
             return entry;
         }
+
+        private static string ColorText(ConnectionEntry entry) =>
+            string.IsNullOrEmpty(entry.Color) ? string.Empty : $", color {entry.Color}";
 
         private static string Login(ConnectionEntry entry) => entry.UseWindowsAuth ? "Windows authentication" : "login " + entry.UserName;
 

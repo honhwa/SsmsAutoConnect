@@ -7,6 +7,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Windows.Forms;
+using Microsoft.SqlServer.Management.Common;
 using Microsoft.SqlServer.Management.Smo.RegSvrEnum;
 using Microsoft.SqlServer.Management.UI.ConnectionDlg;
 using Microsoft.SqlServer.Management.UI.VSIntegration.ObjectExplorer;
@@ -205,6 +206,39 @@ namespace SsmsAutoConnect
         }
 
         private static readonly TimeSpan BuildWaitLimit = TimeSpan.FromSeconds(120);
+
+        /// <summary>
+        /// The custom connection color of an Object Explorer connection, as "#RRGGBB", or null if it has none or it can't
+        /// be read. Nodes only expose the core SqlOlapConnectionInfoBase; the color lives in the UIConnectionInfo that OE
+        /// keeps in its internal ConnectionCache (ObjectExplorer.dll):
+        ///   internal static UIConnectionInfo ConnectionCache.GetUIConnectionInfo(SqlOlapConnectionInfoBase)
+        /// </summary>
+        public static string TryGetCustomColor(SqlOlapConnectionInfoBase connection)
+        {
+            try
+            {
+                Type cacheType = AppDomain.CurrentDomain.GetAssemblies()
+                    .FirstOrDefault(a => a.GetName().Name == "ObjectExplorer")
+                    ?.GetType("Microsoft.SqlServer.Management.UI.VSIntegration.ObjectExplorer.ConnectionCache");
+                MethodInfo getUi = cacheType?.GetMethod("GetUIConnectionInfo", StaticNonPublic | BindingFlags.Public,
+                    null, new[] { typeof(SqlOlapConnectionInfoBase) }, null);
+                if (getUi == null)
+                {
+                    Log.Error("ConnectionCache.GetUIConnectionInfo not found; connection color not captured");
+                    return null;
+                }
+                if (!(getUi.Invoke(null, new object[] { connection }) is UIConnectionInfo ci))
+                    return null;
+                if (!UIConnectionInfoUtil.GetUseCustomConnectionColor(ci))
+                    return null;
+                return ConnectionEntry.FormatColor(UIConnectionInfoUtil.GetCustomConnectionColor(ci));
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Reading connection color failed", ex is TargetInvocationException tie && tie.InnerException != null ? tie.InnerException : ex);
+                return null;
+            }
+        }
 
         private object GetTree()
         {

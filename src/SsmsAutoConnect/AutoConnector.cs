@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.SqlServer.Management.Smo.RegSvrEnum;
+using Microsoft.SqlServer.Management.UI.ConnectionDlg;
 using Microsoft.SqlServer.Management.UI.VSIntegration.ObjectExplorer;
 using Microsoft.VisualStudio.Shell;
 using Task = System.Threading.Tasks.Task;
@@ -153,6 +154,20 @@ namespace SsmsAutoConnect
             }
             if (!string.IsNullOrEmpty(e.Database))
                 ci.AdvancedOptions["DATABASE"] = e.Database;   // Connect dialog: Options > "Connect to database"
+
+            // Connect dialog: Connection Properties > "Use custom color" (AdvancedOptions USE_CUSTOM_CONNECTION_COLOR / CUSTOM_CONNECTION_COLOR)
+            if (!string.IsNullOrWhiteSpace(e.Color))
+            {
+                if (e.TryGetColor() is System.Drawing.Color color)
+                {
+                    UIConnectionInfoUtil.SetUseCustomConnectionColor(ci, true);
+                    UIConnectionInfoUtil.SetCustomConnectionColor(ci, color);
+                }
+                else
+                {
+                    Log.Error($"{e}: invalid <Color> '{e.Color}' (use #RRGGBB or a color name); connecting without a custom color");
+                }
+            }
             return ci;
         }
     }

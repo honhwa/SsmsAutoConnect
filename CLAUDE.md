@@ -109,3 +109,13 @@ DB = `UrnPath == "Server/Database"` + `InvariantName`; server URN uses the true 
 - If the server + login already exists, the command asks (Yes/No, default No) before replacing; No leaves the config untouched.
 - SSMS's startup Connect dialog: we don't suppress it in code. The user is pointed at Tools > Options > Environment > Startup >
   "Open empty environment" (our connect code shows the Object Explorer window itself).
+
+## Connection color
+- Config `<Color>` (optional): `#RRGGBB`, `RRGGBB` or a color name, parsed with `ColorTranslator.FromHtml`.
+- Startup: public `UIConnectionInfoUtil.SetUseCustomConnectionColor(ci, true)` + `SetCustomConnectionColor(ci, color)`
+  (ConnectionDlg.dll), i.e. `AdvancedOptions["USE_CUSTOM_CONNECTION_COLOR"]` / `["CUSTOM_CONNECTION_COLOR"]` (ARGB int).
+  The UIConnectionInfo goes into OE's ConnectionCache on connect, and query windows opened from OE take their color from it.
+- Menu command: nodes expose only the core SqlOlapConnectionInfoBase, so the color is read through **internal static
+  `ConnectionCache.GetUIConnectionInfo(SqlOlapConnectionInfoBase)`** (ObjectExplorer.dll, found via the loaded
+  assemblies) in `ObjectExplorerBridge.TryGetCustomColor`. If that fails, the entry is saved without a color and the failure is logged.
+- On update, a connection without a custom color removes `<Color>` from the existing entry.

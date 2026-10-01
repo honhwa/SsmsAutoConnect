@@ -16,6 +16,33 @@ namespace SsmsAutoConnect
         /// <summary>DPAPI-protected, base64 (see PasswordProtector). Never plain text.</summary>
         public string Password { get; set; }
 
+        /// <summary>
+        /// Optional custom connection color (Connect dialog: "Use custom color"), "#RRGGBB" or a color name.
+        /// Null/empty = no custom color.
+        /// </summary>
+        public string Color { get; set; }
+
+        /// <summary>Parses <see cref="Color"/>; null if empty or invalid.</summary>
+        public System.Drawing.Color? TryGetColor()
+        {
+            if (string.IsNullOrWhiteSpace(Color))
+                return null;
+            try
+            {
+                string text = Color.Trim();
+                if (System.Text.RegularExpressions.Regex.IsMatch(text, "^[0-9A-Fa-f]{6}$"))
+                    text = "#" + text;   // "FF8000" → "#FF8000"
+                System.Drawing.Color c = System.Drawing.ColorTranslator.FromHtml(text);
+                return c.IsEmpty ? (System.Drawing.Color?)null : c;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        public static string FormatColor(System.Drawing.Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
+
         /// <summary>Server + login: entries with the same key are the same connection.</summary>
         public string Key => MakeKey(Server, UseWindowsAuth ? null : UserName);
 
@@ -37,6 +64,7 @@ namespace SsmsAutoConnect
     ///     &lt;UseWindowsAuth&gt;true&lt;/UseWindowsAuth&gt;
     ///     &lt;UserName /&gt;
     ///     &lt;Password /&gt;
+    ///     &lt;Color&gt;#FF8000&lt;/Color&gt;   (optional custom connection color)
     ///   &lt;/Connection&gt;
     /// &lt;/Connections&gt;
     /// </code>
@@ -74,6 +102,7 @@ namespace SsmsAutoConnect
             UseWindowsAuth = !bool.TryParse(Text(e, "UseWindowsAuth"), out bool b) || b,
             UserName = Text(e, "UserName"),
             Password = Text(e, "Password"),
+            Color = Text(e, "Color"),
         };
 
         public static void Save(IEnumerable<ConnectionEntry> entries)
@@ -87,7 +116,8 @@ namespace SsmsAutoConnect
                         new XElement("Database", c.Database ?? string.Empty),
                         new XElement("UseWindowsAuth", c.UseWindowsAuth ? "true" : "false"),
                         new XElement("UserName", c.UserName ?? string.Empty),
-                        new XElement("Password", c.Password ?? string.Empty)))));
+                        new XElement("Password", c.Password ?? string.Empty),
+                        string.IsNullOrEmpty(c.Color) ? null : new XElement("Color", c.Color)))));
             doc.Save(ConfigPath);
         }
 
@@ -118,6 +148,10 @@ namespace SsmsAutoConnect
                 SetChild(existing, "Database", entry.Database);
                 if (!entry.UseWindowsAuth && !string.IsNullOrEmpty(entry.Password))
                     SetChild(existing, "Password", entry.Password);
+                if (string.IsNullOrEmpty(entry.Color))
+                    existing.Element("Color")?.Remove();
+                else
+                    SetChild(existing, "Color", entry.Color);
             }
             else
             {
@@ -128,7 +162,8 @@ namespace SsmsAutoConnect
                         new XElement("Database", entry.Database ?? string.Empty),
                         new XElement("UseWindowsAuth", entry.UseWindowsAuth ? "true" : "false"),
                         new XElement("UserName", entry.UserName ?? string.Empty),
-                        new XElement("Password", entry.Password ?? string.Empty)),
+                        new XElement("Password", entry.Password ?? string.Empty),
+                        string.IsNullOrEmpty(entry.Color) ? null : new XElement("Color", entry.Color)),
                     new XText(Environment.NewLine));
             }
             var settings = new System.Xml.XmlWriterSettings { OmitXmlDeclaration = doc.Declaration == null };

@@ -6,6 +6,7 @@ An extension for **SQL Server Management Studio 18** that connects your preferre
 - Skips connections that are already open in Object Explorer and collapses the new server nodes.
 - Opens and validates connections in the background. An unreachable server or a bad login is logged and doesn't affect the others.
 - Adds **Add to startup connections** to the right-click menu of database nodes in Object Explorer.
+- Restores each connection's custom color (the Connect dialog's *Use custom color*), so query windows keep their status-bar color.
 - Stores SQL-login passwords encrypted with Windows DPAPI for the current user, never in plain text.
 
 Tested on SSMS 18.10 (15.0.18390). SSMS 18 has no public API for connecting Object Explorer, so the extension uses a few internal SSMS members via reflection. If those members are missing in another build, it falls back to the public API. The details are in [CLAUDE.md](CLAUDE.md).
@@ -41,13 +42,16 @@ The extension reads `%AppData%\SsmsAutoConnect\connections.xml`, and creates a s
   <Connection>
     <Server>DEV</Server><Database>MyDb</Database>
     <UseWindowsAuth>false</UseWindowsAuth><UserName>ro_user</UserName><Password>AQAAANCMnd8B...</Password>
+    <Color>#FF8000</Color>
   </Connection>
 </Connections>
 ```
 
 A connection is identified by **server + login**.
 
-The easiest way to add entries is from SSMS: connect to a server, then right-click a database → **Add to startup connections**. If that server + login is already in the config, you'll be asked whether to replace its database.
+`<Color>` is optional: `#RRGGBB`, `RRGGBB` or a color name such as `Red`. Leave it out for no custom color.
+
+The easiest way to add entries is from SSMS: connect to a server, then right-click a database → **Add to startup connections**. The connection's custom color is saved too. If that server + login is already in the config, you'll be asked whether to replace its database and color.
 
 For SQL logins written by hand, generate the `<Password>` value with the bundled tool, run as the same Windows user that runs SSMS:
 
