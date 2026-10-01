@@ -85,3 +85,10 @@ Observed on DEV: typed name `DEV`, true name in the URN `Server[@Name='SQLHOST01
   (GetHierarchy/BuildDataModel + AddHierarchy), the same path as connecting through the Connect dialog.
 - Async DB-node selection: ~15 s wall time; no unresponsive samples during it.
 - SSMS's own startup is unresponsive for ~10 s before our package even loads; that isn't us.
+- With a second server (QA), the warm second attach still took 9.6 s, so it's per-connection SSMS work, not
+  first-connection cost. Preloading won't help, so we accept it (same as a manual connect).
+
+## Collapse setting
+`<Connections Collapse="Server|Databases|None">`, default `Server` (the user's preference). It applies after the DB node is
+selected. Collapsing an ancestor moves the WinForms selection to that ancestor, so with Server/Databases the DB node
+ends up not selected; only `None` leaves it selected.

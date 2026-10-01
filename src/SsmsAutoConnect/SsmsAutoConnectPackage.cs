@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Microsoft.SqlServer.Management.UI.VSIntegration;
@@ -34,9 +33,10 @@ namespace SsmsAutoConnect
         {
             try
             {
-                IReadOnlyList<ConnectionEntry> entries = await Task.Run(() => ConnectionConfig.LoadOrCreateSample(), ct);
-                Log.Info($"Loaded {entries.Count} entr{(entries.Count == 1 ? "y" : "ies")} from {ConnectionConfig.ConfigPath}");
-                if (entries.Count == 0)
+                ConnectionSettings settings = await Task.Run(() => ConnectionConfig.LoadOrCreateSample(), ct);
+                int count = settings.Entries.Count;
+                Log.Info($"Loaded {count} entr{(count == 1 ? "y" : "ies")} from {ConnectionConfig.ConfigPath}");
+                if (count == 0)
                     return;
 
                 IObjectExplorerService oe = await WaitForObjectExplorerAsync(ct);
@@ -48,7 +48,7 @@ namespace SsmsAutoConnect
 
                 await JoinableTaskFactory.SwitchToMainThreadAsync(ct);
                 var bridge = new ObjectExplorerBridge(oe);
-                await AutoConnector.RunAsync(bridge, entries, ct);
+                await AutoConnector.RunAsync(bridge, settings, ct);
                 Log.Info("Done");
             }
             catch (OperationCanceledException)

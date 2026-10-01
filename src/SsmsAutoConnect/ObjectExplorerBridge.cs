@@ -167,7 +167,7 @@ namespace SsmsAutoConnect
         /// it relies on OE's own asynchronous node expansion and yields between polls.
         /// (The public FindNode/SynchronizeTree enumerate synchronously on the UI thread, ~15 s freeze on a remote server.)
         /// </summary>
-        public async System.Threading.Tasks.Task<bool> SelectDatabaseNodeAsync(HierarchyTreeNode root, string database, CancellationToken ct)
+        public async System.Threading.Tasks.Task<bool> SelectDatabaseNodeAsync(HierarchyTreeNode root, string database, CollapseMode collapse, CancellationToken ct)
         {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(ct);
             IExplorerHierarchy hierarchy = root.Hierarchy;
@@ -200,10 +200,22 @@ namespace SsmsAutoConnect
                 return false;
             }
 
-            // 3. Select it.
+            // 3. Select it, then collapse as configured. Collapsing an ancestor of the selected node makes
+            //    WinForms move the selection to that ancestor.
             TreeNode dbNode = FindChild(folder, isTarget);
             dbNode.TreeView.SelectedNode = dbNode;
-            dbNode.EnsureVisible();
+            switch (collapse)
+            {
+                case CollapseMode.Server:
+                    root.Collapse(ignoreChildren: false);
+                    break;
+                case CollapseMode.Databases:
+                    folder.Collapse(ignoreChildren: false);
+                    break;
+                default:
+                    dbNode.EnsureVisible();
+                    break;
+            }
             return true;
         }
 

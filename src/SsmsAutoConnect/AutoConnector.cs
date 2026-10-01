@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
@@ -17,13 +17,13 @@ namespace SsmsAutoConnect
         private static readonly Guid DatabaseEngineServerType = new Guid("8c91a03d-f9b4-46c0-a305-b5dcc79ff907");
 
         /// <summary>Called on the UI thread with Object Explorer available.</summary>
-        public static async Task RunAsync(ObjectExplorerBridge bridge, IReadOnlyList<ConnectionEntry> entries, CancellationToken ct)
+        public static async Task RunAsync(ObjectExplorerBridge bridge, ConnectionSettings settings, CancellationToken ct)
         {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(ct);
 
             HashSet<string> connected = bridge.GetConnectedServerNames() ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var toConnect = new List<ConnectionEntry>();
-            foreach (ConnectionEntry e in entries)
+            foreach (ConnectionEntry e in settings.Entries)
             {
                 if (string.IsNullOrWhiteSpace(e.Server))
                 {
@@ -83,18 +83,18 @@ namespace SsmsAutoConnect
                     Log.Error($"{p.Entry}: server node not found after connecting; database not selected");
                     continue;
                 }
-                selections.Add(SelectAsync(bridge, root, p.Entry, ct));
+                selections.Add(SelectAsync(bridge, root, p.Entry, settings.Collapse, ct));
             }
             await Task.WhenAll(selections);
         }
 
-        private static async Task SelectAsync(ObjectExplorerBridge bridge, HierarchyTreeNode root, ConnectionEntry entry, CancellationToken ct)
+        private static async Task SelectAsync(ObjectExplorerBridge bridge, HierarchyTreeNode root, ConnectionEntry entry, CollapseMode collapse, CancellationToken ct)
         {
             var sw = Stopwatch.StartNew();
             try
             {
-                if (await bridge.SelectDatabaseNodeAsync(root, entry.Database, ct))
-                    Log.Info($"{entry}: database node selected after {sw.ElapsedMilliseconds} ms");
+                if (await bridge.SelectDatabaseNodeAsync(root, entry.Database, collapse, ct))
+                    Log.Info($"{entry}: database node selected after {sw.ElapsedMilliseconds} ms (collapse: {collapse})");
             }
             catch (Exception ex)
             {
